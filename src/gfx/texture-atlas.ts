@@ -41,27 +41,36 @@ function clamp(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)));
 }
 
-export function createTextureArray(device: GPUDevice): GPUTexture {
+export function createTextureArray(gl: WebGL2RenderingContext): WebGLTexture {
   const layerCount = TILES.length;
-  const texture = device.createTexture({
-    size: [TILE_SIZE, TILE_SIZE, layerCount],
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-    mipLevelCount: 1,
-  });
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+  gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, TILE_SIZE, TILE_SIZE, layerCount);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
 
   TILES.forEach((spec, layer) => {
     const canvas = new OffscreenCanvas(TILE_SIZE, TILE_SIZE);
     const ctx = canvas.getContext("2d")!;
     paintTile(ctx, spec, 0xc0ffee + layer * 101);
     const imageData = ctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE);
-    device.queue.writeTexture(
-      { texture, origin: [0, 0, layer] },
+    gl.texSubImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      0,
+      0,
+      layer,
+      TILE_SIZE,
+      TILE_SIZE,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
       imageData.data,
-      { bytesPerRow: TILE_SIZE * 4, rowsPerImage: TILE_SIZE },
-      { width: TILE_SIZE, height: TILE_SIZE, depthOrArrayLayers: 1 },
     );
   });
 
-  return texture;
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+  return texture!;
 }

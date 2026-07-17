@@ -1,214 +1,167 @@
 import { mat4, vec3 } from "gl-matrix";
-import voxelShaderCode from "./shaders/voxel.wgsl?raw";
-import skyboxShaderCode from "./shaders/skybox.wgsl?raw";
+import voxelVertSource from "./shaders/voxel.vert.glsl?raw";
+import voxelFragSource from "./shaders/voxel.frag.glsl?raw";
+import skyVertSource from "./shaders/skybox.vert.glsl?raw";
+import skyFragSource from "./shaders/skybox.frag.glsl?raw";
 import { createTextureArray } from "./texture-atlas";
 import { Camera } from "./camera";
 import { Chunk } from "../world/chunk";
 import { FAR_PLANE } from "../config";
 
-const VOXEL_UNIFORM_SIZE = 4 * 16 + 16 + 16 + 16; // mat4 + cameraPos + fogColor + fogParams
-const SKY_UNIFORM_SIZE = 4 * 16 + 16; // invViewProj + sunDirection
+function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+  const shader = gl.createShader(type)!;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(`Shader compile error: ${log}`);
+  }
+  return shader;
+}
+
+function linkProgram(gl: WebGL2RenderingContext, vertSource: string, fragSource: string): WebGLProgram {
+  const vert = compileShader(gl, gl.VERTEX_SHADER, vertSource);
+  const frag = compileShader(gl, gl.FRAGMENT_SHADER, fragSource);
+  const program = gl.createProgram()!;
+  gl.attachShader(program, vert);
+  gl.attachShader(program, frag);
+  gl.linkProgram(program);
+  gl.deleteShader(vert);
+  gl.deleteShader(frag);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error(`Program link error: ${log}`);
+  }
+  return program;
+}
 
 export class Renderer {
   static lastError: string | null = null;
 
-  readonly device: GPUDevice;
-  private context: GPUCanvasContext;
-  private format: GPUTextureFormat;
+  readonly gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
 
-  private depthTexture!: GPUTexture;
-  private depthView!: GPUTextureView;
+  private voxelProgram!: WebGLProgram;
+  private voxelUniforms!: {
+    viewProj: WebGLUniformLocation | null;
+    cameraPos: WebGLUniformLocation | null;
+    fogColor: WebGLUniformLocation | null;
+    fogParams: WebGLUniformLocation | null;
+    atlas: WebGLUniformLocation | null;
+  };
+  private atlasTexture!: WebGLTexture;
 
-  private voxelPipeline!: GPURenderPipeline;
-  private voxelUniformBuffer!: GPUBuffer;
-  private voxelBindGroup!: GPUBindGroup;
-
-  private skyPipeline!: GPURenderPipeline;
-  private skyUniformBuffer!: GPUBuffer;
-  private skyBindGroup!: GPUBindGroup;
+  private skyProgram!: WebGLProgram;
+  private skyUniforms!: {
+    invViewProj: WebGLUniformLocation | null;
+    sunDirection: WebGLUniformLocation | null;
+  };
+  private skyVao!: WebGLVertexArrayObject;
 
   private sunDirection = vec3.normalize(vec3.create(), vec3.fromValues(0.4, 0.85, 0.3));
 
-  private constructor(device: GPUDevice, context: GPUCanvasContext, format: GPUTextureFormat, canvas: HTMLCanvasElement) {
-    this.device = device;
-    this.context = context;
-    this.format = format;
+  private constructor(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement) {
+    this.gl = gl;
     this.canvas = canvas;
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<Renderer> {
-    if (!navigator.gpu) {
-      throw new Error("WebGPU is not supported in this browser.");
-    }
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) throw new Error("No suitable GPUAdapter found.");
-    const device = await adapter.requestDevice();
-    device.lost.then((info) => {
-      console.error("WebGPU device lost:", info.message);
-    });
-    device.addEventListener("uncapturederror", (event) => {
-      const message = (event as GPUUncapturedErrorEvent).error.message;
-      console.error("WebGPU validation error:", message);
-      Renderer.lastError = message;
+    const gl = canvas.getContext("webgl2", { antialias: true, powerPreference: "high-performance" });
+    if (!gl) throw new Error("WebGL2 is not supported in this browser.");
+
+    canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      console.error("WebGL context lost");
+      Renderer.lastError = "WebGL context lost";
     });
 
-    const context = canvas.getContext("webgpu");
-    if (!context) throw new Error("Failed to acquire WebGPU canvas context.");
-    const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: "opaque" });
-
-    const renderer = new Renderer(device, context, format, canvas);
+    const renderer = new Renderer(gl, canvas);
     renderer.initResources();
     renderer.resize();
     return renderer;
   }
 
   private initResources(): void {
-    const device = this.device;
+    const gl = this.gl;
 
-    // --- Voxel pipeline ---
-    const voxelModule = device.createShaderModule({ code: voxelShaderCode });
-    const voxelBindGroupLayout = device.createBindGroupLayout({
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
-        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d-array" } },
-      ],
-    });
+    // --- Voxel program ---
+    this.voxelProgram = linkProgram(gl, voxelVertSource, voxelFragSource);
+    this.voxelUniforms = {
+      viewProj: gl.getUniformLocation(this.voxelProgram, "uViewProj"),
+      cameraPos: gl.getUniformLocation(this.voxelProgram, "uCameraPos"),
+      fogColor: gl.getUniformLocation(this.voxelProgram, "uFogColor"),
+      fogParams: gl.getUniformLocation(this.voxelProgram, "uFogParams"),
+      atlas: gl.getUniformLocation(this.voxelProgram, "uAtlas"),
+    };
 
-    this.voxelPipeline = device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [voxelBindGroupLayout] }),
-      vertex: {
-        module: voxelModule,
-        entryPoint: "vs_main",
-        buffers: [
-          {
-            arrayStride: 7 * 4,
-            attributes: [
-              { shaderLocation: 0, offset: 0, format: "float32x3" },
-              { shaderLocation: 1, offset: 12, format: "float32" },
-              { shaderLocation: 2, offset: 16, format: "float32x2" },
-              { shaderLocation: 3, offset: 24, format: "float32" },
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: voxelModule,
-        entryPoint: "fs_main",
-        targets: [{ format: this.format }],
-      },
-      primitive: { topology: "triangle-list", cullMode: "back" },
-      depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
-    });
+    this.atlasTexture = createTextureArray(gl);
 
-    this.voxelUniformBuffer = device.createBuffer({
-      size: VOXEL_UNIFORM_SIZE,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    // --- Skybox program ---
+    this.skyProgram = linkProgram(gl, skyVertSource, skyFragSource);
+    this.skyUniforms = {
+      invViewProj: gl.getUniformLocation(this.skyProgram, "uInvViewProj"),
+      sunDirection: gl.getUniformLocation(this.skyProgram, "uSunDirection"),
+    };
+    this.skyVao = gl.createVertexArray()!;
 
-    const atlas = createTextureArray(device);
-    const sampler = device.createSampler({
-      magFilter: "nearest",
-      minFilter: "nearest",
-      addressModeU: "repeat",
-      addressModeV: "repeat",
-    });
-
-    this.voxelBindGroup = device.createBindGroup({
-      layout: voxelBindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: this.voxelUniformBuffer } },
-        { binding: 1, resource: sampler },
-        { binding: 2, resource: atlas.createView({ dimension: "2d-array" }) },
-      ],
-    });
-
-    // --- Skybox pipeline ---
-    const skyModule = device.createShaderModule({ code: skyboxShaderCode });
-    const skyBindGroupLayout = device.createBindGroupLayout({
-      entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }],
-    });
-    this.skyPipeline = device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [skyBindGroupLayout] }),
-      vertex: { module: skyModule, entryPoint: "vs_main" },
-      fragment: { module: skyModule, entryPoint: "fs_main", targets: [{ format: this.format }] },
-      primitive: { topology: "triangle-list" },
-      depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "less-equal" },
-    });
-    this.skyUniformBuffer = device.createBuffer({
-      size: SKY_UNIFORM_SIZE,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    this.skyBindGroup = device.createBindGroup({
-      layout: skyBindGroupLayout,
-      entries: [{ binding: 0, resource: { buffer: this.skyUniformBuffer } }],
-    });
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
   }
 
   resize(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
     const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
-    if (this.canvas.width === width && this.canvas.height === height && this.depthTexture) return;
+    if (this.canvas.width === width && this.canvas.height === height) return;
 
     this.canvas.width = width;
     this.canvas.height = height;
-
-    this.depthTexture?.destroy();
-    this.depthTexture = this.device.createTexture({
-      size: [width, height],
-      format: "depth24plus",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
-    this.depthView = this.depthTexture.createView();
+    this.gl.viewport(0, 0, width, height);
   }
 
   render(camera: Camera, chunks: Iterable<Chunk>): void {
-    const device = this.device;
+    const gl = this.gl;
 
-    const invViewProj = mat4.invert(mat4.create(), camera.getViewProjMatrix());
-    const skyData = new Float32Array(SKY_UNIFORM_SIZE / 4);
-    skyData.set(invViewProj as unknown as Float32Array, 0);
-    skyData.set(this.sunDirection, 16);
-    device.queue.writeBuffer(this.skyUniformBuffer, 0, skyData);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    const voxelData = new Float32Array(VOXEL_UNIFORM_SIZE / 4);
-    voxelData.set(camera.getViewProjMatrix() as unknown as Float32Array, 0);
-    voxelData.set([camera.position[0], camera.position[1], camera.position[2], 0], 16);
-    voxelData.set([0.75, 0.85, 0.95, 1.0], 20); // fog color matches sky horizon
-    voxelData.set([FAR_PLANE * 0.55, FAR_PLANE * 0.95, 0, 0], 24);
-    device.queue.writeBuffer(this.voxelUniformBuffer, 0, voxelData);
+    // --- Skybox: fullscreen triangle pinned to the far plane, depth writes off ---
+    const invViewProj = mat4.invert(mat4.create(), camera.getViewProjMatrix()) ?? mat4.create();
+    gl.depthMask(false);
+    gl.useProgram(this.skyProgram);
+    gl.bindVertexArray(this.skyVao);
+    gl.uniformMatrix4fv(this.skyUniforms.invViewProj, false, invViewProj);
+    gl.uniform3fv(this.skyUniforms.sunDirection, this.sunDirection);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
 
-    const encoder = device.createCommandEncoder();
-    const view = this.context.getCurrentTexture().createView();
+    // --- Voxel chunks ---
+    gl.useProgram(this.voxelProgram);
+    gl.uniformMatrix4fv(this.voxelUniforms.viewProj, false, camera.getViewProjMatrix());
+    gl.uniform3fv(this.voxelUniforms.cameraPos, camera.position);
+    gl.uniform4f(this.voxelUniforms.fogColor, 0.75, 0.85, 0.95, 1.0); // fog color matches sky horizon
+    gl.uniform2f(this.voxelUniforms.fogParams, FAR_PLANE * 0.55, FAR_PLANE * 0.95);
 
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{ view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" }],
-      depthStencilAttachment: {
-        view: this.depthView,
-        depthClearValue: 1.0,
-        depthLoadOp: "clear",
-        depthStoreOp: "store",
-      },
-    });
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTexture);
+    gl.uniform1i(this.voxelUniforms.atlas, 0);
 
-    pass.setPipeline(this.skyPipeline);
-    pass.setBindGroup(0, this.skyBindGroup);
-    pass.draw(3);
-
-    pass.setPipeline(this.voxelPipeline);
-    pass.setBindGroup(0, this.voxelBindGroup);
     for (const chunk of chunks) {
-      if (!chunk.vertexBuffer || !chunk.indexBuffer || chunk.indexCount === 0) continue;
-      pass.setVertexBuffer(0, chunk.vertexBuffer);
-      pass.setIndexBuffer(chunk.indexBuffer, "uint32");
-      pass.drawIndexed(chunk.indexCount);
+      if (!chunk.vao || chunk.indexCount === 0) continue;
+      gl.bindVertexArray(chunk.vao);
+      gl.drawElements(gl.TRIANGLES, chunk.indexCount, gl.UNSIGNED_INT, 0);
     }
+    gl.bindVertexArray(null);
 
-    pass.end();
-    device.queue.submit([encoder.finish()]);
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) {
+      Renderer.lastError = `WebGL error code ${error}`;
+    }
   }
 
   get aspect(): number {

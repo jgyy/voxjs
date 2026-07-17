@@ -16,7 +16,7 @@ const overlay = document.getElementById("overlay") as HTMLDivElement;
 async function main(): Promise<void> {
   const renderer = await Renderer.create(canvas);
   const camera = new Camera();
-  const chunkManager = new ChunkManager(renderer.device);
+  const chunkManager = new ChunkManager(renderer.gl);
 
   const input: InputState = {
     forward: false,
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     sprint: false,
   };
 
-  setupLookAndInput(overlay, camera, input);
+  setupLookAndInput(canvas, overlay, camera, input);
 
   window.addEventListener("resize", () => renderer.resize());
 
@@ -92,7 +92,12 @@ async function main(): Promise<void> {
   requestAnimationFrame(frame);
 }
 
-function setupLookAndInput(overlay: HTMLDivElement, camera: Camera, input: InputState): void {
+function setupLookAndInput(
+  canvas: HTMLCanvasElement,
+  overlay: HTMLDivElement,
+  camera: Camera,
+  input: InputState,
+): void {
   const keyMap: Record<string, keyof InputState> = {
     KeyW: "forward",
     KeyS: "back",
@@ -104,22 +109,32 @@ function setupLookAndInput(overlay: HTMLDivElement, camera: Camera, input: Input
     ShiftRight: "sprint",
   };
 
-  let active = false;
-
+  // Pointer Lock recenters the cursor every frame and hands us unbounded
+  // movementX/Y deltas, so looking around never hits the edge of the screen.
+  // The OS cursor it hides is replaced by the always-centered #crosshair
+  // element, so the player still has a visible aim reference.
   overlay.addEventListener("click", () => {
-    active = true;
-    overlay.classList.add("hidden");
+    canvas.requestPointerLock();
+  });
+
+  document.addEventListener("pointerlockchange", () => {
+    const active = document.pointerLockElement === canvas;
+    overlay.classList.toggle("hidden", active);
+  });
+
+  document.addEventListener("pointerlockerror", () => {
+    overlay.classList.remove("hidden");
+    overlay.textContent = "Pointer lock failed — click to try again.";
   });
 
   document.addEventListener("mousemove", (e) => {
-    if (!active) return;
+    if (document.pointerLockElement !== canvas) return;
     camera.applyMouseDelta(e.movementX, e.movementY);
   });
 
   window.addEventListener("keydown", (e) => {
     if (e.code === "Escape") {
-      active = false;
-      overlay.classList.remove("hidden");
+      document.exitPointerLock();
       return;
     }
     const field = keyMap[e.code];

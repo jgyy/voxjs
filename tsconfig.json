@@ -10,7 +10,7 @@
     "isolatedModules": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "types": ["@webgpu/types", "vite/client"]
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

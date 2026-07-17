@@ -12,12 +12,12 @@ function chunkKey(cx: number, cz: number): string {
 export class ChunkManager {
   private chunks = new Map<string, Chunk>();
   private generator = new TerrainGenerator();
-  private device: GPUDevice;
+  private gl: WebGL2RenderingContext;
   /** Cap the number of (re)meshes uploaded per frame to avoid frame-time spikes. */
   private meshBudgetPerFrame = 2;
 
-  constructor(device: GPUDevice) {
-    this.device = device;
+  constructor(gl: WebGL2RenderingContext) {
+    this.gl = gl;
   }
 
   private getBlockGlobal = (x: number, y: number, z: number): number => {
@@ -69,7 +69,7 @@ export class ChunkManager {
       const ddx = chunk.cx - playerChunkX;
       const ddz = chunk.cz - playerChunkZ;
       if (ddx * ddx + ddz * ddz > unloadRadius * unloadRadius) {
-        chunk.dispose();
+        chunk.dispose(this.gl);
         this.chunks.delete(key);
       }
     }
@@ -77,7 +77,7 @@ export class ChunkManager {
 
   private uploadMesh(chunk: Chunk): void {
     const { vertices, indices } = buildChunkMesh(chunk, this.getBlockGlobal);
-    chunk.dispose();
+    chunk.dispose(this.gl);
 
     if (indices.length === 0) {
       chunk.indexCount = 0;
@@ -85,18 +85,35 @@ export class ChunkManager {
       return;
     }
 
-    chunk.vertexBuffer = this.device.createBuffer({
-      size: vertices.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    });
-    this.device.queue.writeBuffer(chunk.vertexBuffer, 0, vertices);
+    const gl = this.gl;
+    const vao = gl.createVertexArray()!;
+    gl.bindVertexArray(vao);
 
-    chunk.indexBuffer = this.device.createBuffer({
-      size: indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-    });
-    this.device.queue.writeBuffer(chunk.indexBuffer, 0, indices);
+    const vertexBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
 
+    const stride = VERTEX_FLOATS * 4;
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 1, gl.FLOAT, false, stride, 12);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, stride, 16);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 24);
+
+    const indexBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+    chunk.vao = vao;
+    chunk.vertexBuffer = vertexBuffer;
+    chunk.indexBuffer = indexBuffer;
     chunk.indexCount = indices.length;
     chunk.dirty = false;
     chunk.meshVersion++;
@@ -105,7 +122,7 @@ export class ChunkManager {
   /** Chunks with a ready GPU mesh that pass the frustum test, for rendering. */
   *visibleChunks(frustum: Frustum): Generator<Chunk> {
     for (const chunk of this.chunks.values()) {
-      if (!chunk.vertexBuffer || chunk.indexCount === 0) continue;
+      if (!chunk.vao || chunk.indexCount === 0) continue;
       const minX = chunk.worldOriginX;
       const minZ = chunk.worldOriginZ;
       if (

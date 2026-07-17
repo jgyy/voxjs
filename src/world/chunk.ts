@@ -15,8 +15,9 @@ export class Chunk {
   dirty = true;
   /** GPU mesh buffers are attached externally by the mesher/renderer. */
   meshVersion = 0;
-  vertexBuffer: GPUBuffer | null = null;
-  indexBuffer: GPUBuffer | null = null;
+  vao: WebGLVertexArrayObject | null = null;
+  vertexBuffer: WebGLBuffer | null = null;
+  indexBuffer: WebGLBuffer | null = null;
   indexCount = 0;
 
   constructor(cx: number, cz: number) {
@@ -45,10 +46,12 @@ export class Chunk {
     return this.cz * CHUNK_SIZE_Z;
   }
 
-  dispose(): void {
-    this.vertexBuffer?.destroy();
-    this.indexBuffer?.destroy();
+  dispose(gl: WebGL2RenderingContext): void {
+    if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
+    if (this.indexBuffer) gl.deleteBuffer(this.indexBuffer);
+    if (this.vao) gl.deleteVertexArray(this.vao);
     this.vertexBuffer = null;
     this.indexBuffer = null;
+    this.vao = null;
   }
 }
