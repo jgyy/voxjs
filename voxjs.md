@@ -1,10 +1,13 @@
-# Ft_vox
+# ft_minecraft
 
-## Pimp my blocks
+## Pimp My World
 
-**Summary:** This project is the first step to the creation of your very own Voxel World!
+**Summary:** ft_vox but harder
 
-**Version:** 6.1
+**Version:** 2.2
+
+Sylvain Lopez <slopez@student.42lyon.fr>
+Ludovic Lemaire <lulemair@student.42lyon.fr>
 
 ---
 
@@ -13,128 +16,175 @@
 - [Chapter I: Preamble](#chapter-i-preamble)
 - [Chapter II: Introduction](#chapter-ii-introduction)
 - [Chapter III: Objectives](#chapter-iii-objectives)
-- [Chapter IV: General instructions](#chapter-iv-general-instructions)
-- [Chapter V: Mandatory part](#chapter-v-mandatory-part)
-  - [V.1 The world](#v1-the-world)
+- [Chapter IV: General Instructions](#chapter-iv-general-instructions)
+- [Chapter V: Mandatory Part](#chapter-v-mandatory-part)
+  - [V.1 The World](#v1-the-world)
   - [V.2 Graphic rendering](#v2-graphic-rendering)
-  - [V.3 The camera](#v3-the-camera)
-  - [V.4 To sum it up](#v4-to-sum-it-up)
-- [Chapter VI: Bonus part](#chapter-vi-bonus-part)
-- [Chapter VII: Submission and peer-evaluation](#chapter-vii-submission-and-peer-evaluation)
+  - [V.3 Camera](#v3-camera)
+  - [V.4 Sounds](#v4-sounds)
+  - [V.5 Multiplayer and server](#v5-multiplayer-and-server)
+  - [V.6 Interface](#v6-interface)
+  - [V.7 Other](#v7-other)
+- [Chapter VI: Bonus Part](#chapter-vi-bonus-part)
+- [Chapter VII: Submission And Peer Evaluation](#chapter-vii-submission-and-peer-evaluation)
 
 ---
 
 ## Chapter I: Preamble
 
-*By Mike Acton on March 14, 2008 9:44 PM*
+Mojang Studios is a Swedish video game developer based in Stockholm. Founded by the independent game designer Markus Persson in 2009 as Mojang Specifications, it aimed to develop and release Persson's sandbox and survival video game, *Minecraft*. The studio inherited its name from a previous game project Persson had left two years earlier. Following Minecraft's release, Persson and Jakob Porsér incorporated the business as Mojang AB in late 2010, hiring Carl Manneh as the company's CEO. Early hires also included Daniel Kaplan and Jens Bergensten.
 
-One of the things we talked about this year at GDC was what we called the "Three Big Lies of Software Development." How much programmers buy into these "lies" has a pretty profound effect on the design (and performance!) of an engine, or any high-performance embedded system for that matter.
+Minecraft became a massive success, eventually becoming the best-selling game of all time, driving Mojang's rapid growth. With Persson wanting to move on, he offered to sell his share in the company. In November 2014, Microsoft acquired Mojang through Xbox Game Studios (formerly Microsoft Studios). Persson, Porsér, and Manneh left Mojang, and Jonas Mårtensson stepped in as CEO. In May 2020, Mojang rebranded itself as Mojang Studios.
 
-### (LIE 1) SOFTWARE IS A PLATFORM
+As of 2021, Mojang Studios employs approximately 600 people, with Jonas Mårtensson as CEO and Helen Chiang as studio head. Besides Minecraft, the studio developed Caller's Bane, a digital collectible card game, Crown and Council, a turn-based strategy game, and Minecraft Dungeons, a dungeon crawler. It also released smaller games as part of Humble Bundle game jams.
 
-I blame the universities for this one. Academics like to remove as many variables from a problem as possible and try to solve things under "ideal" or completely general conditions. It's like old physicist jokes that go "We have made several simplifying assumptions... first, let each horse be a perfect rolling sphere..."
-
-The reality is software is not a platform. You can't idealize the hardware. And the constants in the "Big-O notation" that are so often ignored, are often the parts that actually matter in reality (for example, memory performance.) You can't judge code in a vacuum. Hardware impacts data design. Data design impacts code choices. If you forget that, you have something that might work, but you aren't going to know if it's going to work well on the platform you're working with, with the data you actually have.
-
-### (LIE 2) CODE SHOULD BE DESIGNED AROUND A MODEL OF THE WORLD
-
-There is no value in code being some kind of model or map of an imaginary world. I don't know why this one is so compelling for some programmers, but it is extremely popular. If there's a rocket in the game, rest assured that there is a "Rocket" class (Assuming the code is C++) which contains data for exactly one rocket and does rocketty stuff. With no regard at all for what data transformation is really being done, or for the layout of the data. Or for that matter, without the basic understanding that where there's one thing, there's probably more than one.
-
-Though there are a lot of performance penalties for this kind of design, the most significant one is that it doesn't scale. At all. One hundred rockets costs one hundred times as much as one rocket. And it's extremely likely it costs even more than that! Even to a non-programmer, that shouldn't make any sense. Economy of scale. If you have more of something, it should get cheaper, not more expensive. And the way to do that is to design the data properly and group things by similar transformations.
-
-### (LIE 3) CODE IS MORE IMPORTANT THAN DATA
-
-This is the biggest lie of all. Programmers have spent untold billions of man-years writing about code, how to write it faster, better, prettier, etc. and at the end of the day, it's not that significant. Code is ephemeral and has no real intrinsic value. The algorithms certainly do, sure. But the code itself isn't worth all this time (and shelf space! - have you seen how many books there are on UML diagrams?). The code, the performance and the features hinge on one thing - the data. Bad data equals slow and crappy application. Writing a good engine means first and foremost, understanding the data.
+In 2011, Persson and Kaplan imagined a mix of Minecraft and Lego bricks, partnering with the Lego Group to create "Brickcraft," codenamed "Rex Kwon Do" (a nod to the movie Napoleon Dynamite). However, Mojang canceled the project after six months. Persson stated it was to focus on their own games, while Daniel Mathiasen from Lego blamed legal restrictions. Lego even considered acquiring Mojang but eventually decided against it, not realizing how big Minecraft would become.
 
 ---
 
 ## Chapter II: Introduction
 
-Welcome to the beautiful world of voxels, where you will use all the benefits of the abstraction "the whole world is a 3 dimensions grid" in order to display a daunting number of things on a screen, travel in a gigantic procedural universe and a completely malleable playground. What are voxels?
+This project is the logical continuation of `ft_vox`. However, `ft_minecraft` aims to push things further, with a particular emphasis on Procedural Generation and the overall beauty of the rendered world.
 
-*(Two reference screenshots of a voxel terrain — green/brown blocky landscape — are shown at different render distances: 320 cubes and a nighttime/underground view.)*
+You will also be diving into networking to enable multiplayer features. Let's face it, it's way more fun to build and destroy things with friends!
 
 ---
 
 ## Chapter III: Objectives
 
-This project aims to confront you to a graphic project that will be extremely demanding in terms of optimization. You will have to study the characteristics of the voxel worlds, and use them along your infographics knowledge to display a lot of elements on screen. Thus, you will have to study different algo/opti to obtain a SMOOTH render (there are many of them). You will also have to manage your memory and data structures properly to be able to travel in a very, very large universe. Once you have achieved that, you will be ready to get to the next level with the project ft_minecraft, which will be even more demanding.
+This project focuses on two major aspects:
+
+- **Advanced Procedural Generation:** Diverse biomes, lush vegetation, winding rivers, volumetric 3D clouds, and intricate cave systems filled with ores.
+- **Advanced Rendering Effects:** Lighting, Shadows, Screen-Space Ambient Occlusion (SSAO), and much more.
 
 ---
 
-## Chapter IV: General instructions
+## Chapter IV: General Instructions
 
-- You're free to use your language, but keep an eye on its performances. (If you can't choose, c/c++/rust are suggested).
-- You must work directly with the APIs (OpenGL, OpenCL, Vulkan, Metal, or WebGPU). You cannot use higher-level libraries built on top of them.
-- You can use a library to load 3D objects and pictures, a windowing library and a mathematics library for your matrix/quaternions/vectors calculations. You must not push them in your repo. Instead, you must write your own download/install scripts.
-- The render should always be SMOOTH. This means if your assessor considers your game offers an unpleasant visual experience, he can give you a 0.
-- Any crash (Uncaught exception, segfault, abort ...) will disqualify you.
-- Your program must be able to run for hours without eating the whole memory or slowing down. Manage your RAM as well as VRAM very carefully.
-- Your program will have to run in full screen mode. Reduce the default frame buffer is prohibited.
+- You are free to use any programming language, but keep performance in mind. If you're unsure, consider `C`, `C++`, or `Rust`.
+- For GPU calculations, you can use `Vulkan`, `Metal`, `WebGPU`, or `OpenGL/CL`. You cannot use a library that does the heavy lifting for you.
+- You may use libraries for image loading, window management, audio, and mathematical operations (matrices, quaternions, vectors), but do not include them in your repository. Instead, write scripts to download and install them.
+- Using pre-built libraries for terrain or biome generation is strictly **forbidden**. You must implement everything from scratch.
+- The rendering must be consistently **smooth**, with a minimum of 25 FPS (on an i5 3.4 GHz, 8 GB RAM, Radeon Pro 570 4 GB, or equivalent specs).
+- Any crash (uncaught exception, segmentation fault, abort, etc.) will be grounds for disqualification.
+- Your program must run at 1080p or higher. Reducing the framebuffer resolution is not allowed.
 
 ---
 
-## Chapter V: Mandatory part
+## Chapter V: Mandatory Part
 
-### V.1 The world
+### V.1 The World
 
-You must be able to create a very large procedural world. For this project, user should be able to visit at least 16384\*256\*16384 cubes (256 is the height).
-
-> ⚠️ **The ft_minecraft project will be WAY bigger !**
-
-Some cubes may be empty, others can have different types, like grass, ground, sand, etc...
-Except for the empty cubes, they will all be opaque but will have their own textures.
-You must implement a method to generate terrains such as hills, mountains or caves when the user goes underground. This generation has to be determinist, which means the same seed will spawn the exact same map.
-The terrain should have a remotely natural topography, with hills and/or mountains, caves and so on... A simple rand() will not be tolerated.
-Each visited piece of terrain must be saved in the memory up to some limit you will set yourself and after which you can start deleting cubes from the memory.
-
-*(Screenshot: first-person underground cave view with stone/dirt textures.)*
+- The world must be generated on demand.
+- You should be able to navigate through at least 5,000,000 cubes on the XZ plane. You are free to manage how surpassing this limit is handled: *(e.g., invisible walls, mirrored world, etc.)*.
+- The terrain should not be uniform; you must implement different biomes like mountains, canyons, islands, etc.
+- A minimum of 5 unique biomes is required: *(e.g., Mountain, Desert, Canyon, Swamp, Sequoia Forest, Island, Savanna, etc.)*.
+- Each biome should have unique geography, elevation, vegetation, and distinct characteristics that make them feel truly unique.
+- Biomes should transition smoothly and naturally without abrupt changes — for example, a Canyon transitioning into a neighboring Desert.
+- Mountains must rise gradually out of the surrounding terrain (through foothills, slopes, etc.). A mountain that shoots up abruptly out of flat ground is **wrong**; a mountain with a gradual, natural buildup is **right**.
+- There should be small plants, flowers, and mushrooms scattered throughout the world, as well as procedurally generated trees.
+- Trees and leaves must not just be 3D models. Each tree should be generated with varying parameters like shape, height, width, and leaf density to ensure uniqueness (e.g., Jungle trees alongside Hill trees, each unique in shape and size).
+- There must be lakes and rivers meandering across the world, as well as natural cave entrances visible from the surface.
+- These caves should feature realistic formations (wormhole style) and contain clusters of rare ores like gold and diamonds, not just simple noise-based distribution. There must be clusters of ores just like in Minecraft, not a simple probability on each block.
+- Monsters (like creepers or zombies) should spawn and chase you when you get close.
+- 3D clouds should float across the world. They can either be represented as blocks (purely visual with no interaction) or as shaders.
+- You should be able to pick up blocks after destroying them (just like in Minecraft) and place them wherever you want.
+- Destroyed or placed blocks must be persistent. This means that if you unload a chunk and then reload it later, the modifications should still be present.
 
 ### V.2 Graphic rendering
 
-Cubes must be displayed on screen.
+You are required to implement everything that was included in ft_vox, but with significant improvements.
 
-In open areas (i.e. when the player's view is not obstructed by walls, caves or dense terrain), your engine must render at least 160 cubes in the player's field of vision. This distance is measured from the camera outward and represents the minimum viewing distance under normal conditions. The first image in the introduction corresponds to a distance of 320 cubes, for reference.
+Differences from ft_vox:
 
-Of course, occluded cubes (e.g., fully hidden behind others) do not need to be drawn. You must implement proper frustum culling and visibility optimization.
+- Minimum render distance is increased from 160 to 260.
+- You may use a sky shader instead of a skybox if desired.
 
-Each cube must be textured, and you must have at least 2 different textures and 2 different types of cubes. Make sure the FoV is always filled with various elements. The user should never feel lost or confused when scanning the ground level.
-Again, render must be smooth. Avoid the freeze frames at all costs.
-FoV must be 80 degrees.
-To make it a little nicer, you will set up a skybox. Don't leave any artefact on its junctions.
+Additionally, you are now expected to implement:
 
-> ⚠️ **If you want your render to run smooth, you should manage the workload so it is equally shared between the CPU and the GPU.**
+- Directional lighting
+- Shadows
+- Screen Space Ambient Occlusion (SSAO)
+- Transparent water surfaces
+- Far distance fog for better immersion
 
-### V.3 The camera
+> ⚠️ **Be careful, your FPS should never drop below 25.**
 
-If we can travel in your game, this would make for a nice touch. You must configure a nice little camera. The mouse must be able to control it on 2 axis at least and you will set 4 keys that will make it go forth, back, right and left in according to the camera rotation. Of course, the user must be able to keep going if he keeps pressing a key. The camera speed should be set around 1 cube/second, but for the evaluation, you will create a key that will multiply this speed by 20.
+> 💡 **To achieve smooth rendering, you should balance the workload evenly between the CPU and GPU.**
 
-### V.4 To sum it up:
+### V.3 Camera
 
-- A gigantic terrain made of textured cubes of different types.
-- A luxurious FOV.
-- An advanced procedural generation offering a natural face to the terrain (hills, mountains, caves, lakes...).
-- An intuitive camera.
-- A skybox.
+Movement is essential.
+The keyboard should allow forward, backward, strafe right, and strafe left movement, relative to the camera's orientation.
+
+You should also implement:
+
+- Jump and sprint actions
+- 360-degree mouse control on the Y-axis, with the ability to look up and down
+- Walking speed of approximately 1 cube per second, and 2 cubes per second when sprinting
+- A toggleable fly-mode, with running speed multiplied by 20 when flying
+
+### V.4 Sounds
+
+The world must be immersive, which means:
+
+- Each biome should have its own unique ambient music, with smooth transitions between them.
+- Both players and monsters must have sounds for actions like walking, attacking, and swimming.
+- The sound volume should dynamically adjust based on distance from the source.
+
+### V.5 Multiplayer and server
+
+Exploring such a vast world alone would be a shame; that's why ft_minecraft must be multiplayer-ready.
+
+Your server should allow at least four players to join simultaneously.
+Players should be visible in the world, performing any actions such as walking, attacking, destroying blocks, and even getting killed by monsters.
+
+All modifications to the world (block placement, block destruction) must be synchronized across all players and persistent even after reloading. Entity states (like monsters) should also be synchronized.
+
+You are free to decide how the server-side is managed, either:
+
+- Procedurally generate the world on the server and dispatch it to clients.
+- Have each client generate the world and synchronize modifications with other clients.
+
+> ℹ️ **Both approaches have their pros and cons. Think carefully before making a choice.**
+
+### V.6 Interface
+
+Players must have access to basic information:
+
+- FPS, triangles, cube, and chunk counts must be displayed on-screen with a key toggle.
+- A list of all connected players should also be available with a key toggle.
+
+### V.7 Other
+
+Since we are moving closer to a real game, some basic functionalities are required:
+
+- A simple gravity system that handles block collisions (excluding water).
+- The ability to swim and dive, with optional slowed movement underwater.
+- Visual rendering adaptations for underwater exploration (color filters, reduced visibility).
+- Basic animations for walking and attacking, Minecraft-like in simplicity.
 
 ---
 
-## Chapter VI: Bonus part
+## Chapter VI: Bonus Part
 
-I bet you're dying to add physics, a player, green explosive monsters that will ruin hours of painstaking work. But this will come with the ft_minecraft project. Right now, you will only focus on the technical side.
+The possibilities are endless! Here are some suggestions:
 
-- Your engine must dynamically manage the render distance to preserve a smooth and fluid display at all times.
-  However, even in extreme cases (e.g. high-speed movement, heavy terrain generation, or low performance conditions), the render distance must **never drop below 14 cubes** in any direction from the player.
-  In open areas, the visible distance should normally reach or exceed 160 cubes, as required in the mandatory part.
-- A fps counter is displayed.
-- Render is smooth and doesn't freeze, event at x20 speed.
-- Being able to delete blocks with the mouse.
-- Having a lot of different biomes.
-
-> ⚠️ **The bonus part will only be assessed if the mandatory part is PERFECT. Perfect means the mandatory part has been integrally done and works without malfunctioning. If you have not passed ALL the mandatory requirements, your bonus part will not be evaluated at all.**
+- Procedurally generated villages.
+- Crafting system.
+- Realistic water simulation (dynamic flow and spreading).
+- Growing plants (from seeds to maturity).
+- A bow and arrow system similar to Minecraft.
+- Nether portal that teleports you to another dimension.
+- Cross-platform support (Windows, Mac, Linux).
+- Stereo sound implementation.
+- An online map interface (like Minecraft's Dynmap).
 
 ---
 
-## Chapter VII: Submission and peer-evaluation
+## Chapter VII: Submission And Peer Evaluation
 
-Turn in your assignment in your `Git` repository as usual. Only the work inside your repository will be evaluated during the defense. Don't hesitate to double check the names of your folders and files to ensure they are correct.
+As usual, submit your work to your Git repository. Only the content available in your repository will be evaluated.
+
+You must push all assets necessary for the project to run on the school server, within a reasonable size limit.
+If your assets exceed 42 MB, you must provide a script to download or manually copy them.
