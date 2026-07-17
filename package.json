@@ -10,8 +10,7 @@
     "install-deps": "bash scripts/install.sh"
   },
   "dependencies": {
-    "gl-matrix": "^3.4.4",
-    "simplex-noise": "^4.0.3"
+    "gl-matrix": "^3.4.4"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

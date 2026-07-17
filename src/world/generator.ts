@@ -1,4 +1,4 @@
-import { createNoise2D, createNoise3D } from "simplex-noise";
+import { createNoise2D, createNoise3D } from "../util/noise";
 import { CHUNK_HEIGHT, CHUNK_SIZE_X, CHUNK_SIZE_Z, WORLD_SEED } from "../config";
 import { BlockId } from "./blocks";
 import { Chunk } from "./chunk";
@@ -21,10 +21,14 @@ function fbm2D(noise2D: (x: number, y: number) => number, x: number, z: number, 
   return sum / maxAmp;
 }
 
+type Biome = "plains" | "forest" | "desert" | "snowy";
+
 export class TerrainGenerator {
   private heightNoise: (x: number, y: number) => number;
   private mountainMaskNoise: (x: number, y: number) => number;
   private caveNoise: (x: number, y: number, z: number) => number;
+  private temperatureNoise: (x: number, y: number) => number;
+  private moistureNoise: (x: number, y: number) => number;
 
   private readonly seaLevel = 62;
   private readonly baseHeight = 68;
@@ -33,6 +37,8 @@ export class TerrainGenerator {
     this.heightNoise = createNoise2D(mulberry32(seed));
     this.mountainMaskNoise = createNoise2D(mulberry32(seed ^ 0x9e3779b9));
     this.caveNoise = createNoise3D(mulberry32(seed ^ 0x85ebca6b));
+    this.temperatureNoise = createNoise2D(mulberry32(seed ^ 0x27d4eb2f));
+    this.moistureNoise = createNoise2D(mulberry32(seed ^ 0x165667b1));
   }
 
   private heightAt(worldX: number, worldZ: number): number {
@@ -45,6 +51,44 @@ export class TerrainGenerator {
     return Math.floor(this.baseHeight + hills + mountains);
   }
 
+  /** Large-scale climate classification driving surface block + color variety ("a lot of different biomes"). */
+  private biomeAt(worldX: number, worldZ: number): Biome {
+    const temperature = fbm2D(this.temperatureNoise, worldX / 700, worldZ / 700, 3);
+    const moisture = fbm2D(this.moistureNoise, worldX / 550, worldZ / 550, 3);
+    if (temperature < -0.25) return "snowy";
+    if (temperature > 0.3 && moisture < -0.05) return "desert";
+    if (moisture > 0.2) return "forest";
+    return "plains";
+  }
+
+  /**
+   * Single source of truth for "what block sits at this depth, in this
+   * biome" — shared by `generate()` and `getBlockAt()` so a chunk's own
+   * voxels and its neighbor's cross-border queries can never disagree.
+   */
+  private surfaceBlock(columnHeight: number, y: number, biome: Biome): BlockId {
+    const isBeach = columnHeight <= this.seaLevel + 1;
+    const depthFromSurface = columnHeight - y;
+
+    if (depthFromSurface === 0) {
+      if (isBeach) return BlockId.Sand;
+      switch (biome) {
+        case "desert":
+          return BlockId.Sand;
+        case "snowy":
+          return BlockId.Snow;
+        case "forest":
+          return BlockId.ForestGrass;
+        default:
+          return BlockId.Grass;
+      }
+    }
+    if (depthFromSurface < 4) {
+      return !isBeach && biome === "desert" ? BlockId.Sand : BlockId.Dirt;
+    }
+    return BlockId.Stone;
+  }
+
   /** Determinism guarantee: identical (seed, cx, cz) always yields the same voxels. */
   generate(chunk: Chunk): void {
     const originX = chunk.worldOriginX;
@@ -55,19 +99,17 @@ export class TerrainGenerator {
         const worldX = originX + lx;
         const worldZ = originZ + lz;
         const columnHeight = Math.min(CHUNK_HEIGHT - 1, this.heightAt(worldX, worldZ));
+        const biome = this.biomeAt(worldX, worldZ);
+        const waterTop = Math.min(CHUNK_HEIGHT - 1, Math.max(columnHeight, this.seaLevel));
 
-        for (let y = 0; y <= columnHeight; y++) {
+        for (let y = 0; y <= waterTop; y++) {
           let block: BlockId;
-          if (y === columnHeight) {
-            block = columnHeight <= this.seaLevel + 1 ? BlockId.Sand : BlockId.Grass;
-          } else if (y > columnHeight - 4) {
-            block = BlockId.Dirt;
-          } else {
-            block = BlockId.Stone;
-          }
-
-          if (this.isCave(worldX, y, worldZ, columnHeight)) {
+          if (y > columnHeight) {
+            block = BlockId.Water; // fills basins below sea level into lakes/ponds
+          } else if (this.isCave(worldX, y, worldZ, columnHeight)) {
             block = BlockId.Air;
+          } else {
+            block = this.surfaceBlock(columnHeight, y, biome);
           }
 
           if (block !== BlockId.Air) {
@@ -86,11 +128,9 @@ export class TerrainGenerator {
   getBlockAt(worldX: number, y: number, worldZ: number): BlockId {
     if (y < 0 || y >= CHUNK_HEIGHT) return BlockId.Air;
     const columnHeight = Math.min(CHUNK_HEIGHT - 1, this.heightAt(worldX, worldZ));
-    if (y > columnHeight) return BlockId.Air;
+    if (y > columnHeight) return y <= this.seaLevel ? BlockId.Water : BlockId.Air;
     if (this.isCave(worldX, y, worldZ, columnHeight)) return BlockId.Air;
-    if (y === columnHeight) return columnHeight <= this.seaLevel + 1 ? BlockId.Sand : BlockId.Grass;
-    if (y > columnHeight - 4) return BlockId.Dirt;
-    return BlockId.Stone;
+    return this.surfaceBlock(columnHeight, y, this.biomeAt(worldX, worldZ));
   }
 
   private isCave(worldX: number, y: number, worldZ: number, surfaceHeight: number): boolean {

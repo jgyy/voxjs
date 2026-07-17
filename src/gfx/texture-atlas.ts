@@ -9,13 +9,17 @@ interface TileSpec {
   speckleChance?: number;
 }
 
-// index 0 unused (Air), 1..4 match BLOCK_FACES layer ids in blocks.ts.
+// Layer indices are referenced by BLOCK_FACES in blocks.ts.
 const TILES: TileSpec[] = [
-  { base: [90, 150, 60], variance: 18 }, // 0: grass top (unused directly, see below)
+  { base: [90, 150, 60], variance: 18 }, // 0: grass top
   { base: [58, 110, 46], variance: 14 }, // 1: grass side
   { base: [110, 80, 55], variance: 16 }, // 2: dirt
   { base: [120, 120, 120], variance: 14, speckleColor: [90, 90, 90], speckleChance: 0.15 }, // 3: stone
   { base: [214, 199, 145], variance: 10 }, // 4: sand
+  { base: [235, 235, 245], variance: 10, speckleColor: [210, 220, 235], speckleChance: 0.2 }, // 5: snow
+  { base: [55, 110, 190], variance: 14 }, // 6: water
+  { base: [45, 100, 40], variance: 16 }, // 7: forest grass top (denser, darker green)
+  { base: [30, 70, 32], variance: 12 }, // 8: forest grass side
 ];
 
 /** Deterministically renders a small tiled texture into a canvas 2D layer. */

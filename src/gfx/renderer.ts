@@ -107,7 +107,11 @@ export class Renderer {
     this.skyVao = gl.createVertexArray()!;
 
     gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LESS);
+    // LEQUAL, not LESS: the skybox's fullscreen triangle is pinned to
+    // gl_Position.z = 1.0 (the far plane) so it draws behind everything, but
+    // the depth buffer is also cleared to 1.0 — under strict LESS that tie
+    // always fails the depth test and the sky never gets drawn at all.
+    gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
   }

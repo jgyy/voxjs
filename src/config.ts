@@ -28,3 +28,14 @@ export const DEFAULT_RENDER_DISTANCE_CHUNKS = 12; // 192 cubes, clears the 160 r
 export const CHUNK_UNLOAD_MARGIN_CHUNKS = 3;
 
 export const WORLD_SEED = 1337;
+
+// Bonus: "being able to delete blocks with the mouse" — arm's-length reach,
+// in cubes, for the block-breaking raycast.
+export const BLOCK_REACH = 6;
+
+// Edited (broken) blocks are kept in memory per-chunk so a chunk that's
+// evicted and later reloaded still shows the player's edits, up to this many
+// distinct edited chunks — beyond that, the oldest edits are forgotten, same
+// "save up to a limit, then start deleting" policy the subject requires for
+// visited terrain in general (V.1).
+export const MAX_EDITED_CHUNKS = 512;

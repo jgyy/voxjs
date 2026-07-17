@@ -1,7 +1,11 @@
+import { vec3 } from "gl-matrix";
 import { Renderer } from "./gfx/renderer";
 import { Camera, InputState } from "./gfx/camera";
 import { ChunkManager } from "./world/chunk-manager";
+import { raycastVoxel } from "./world/raycast";
+import { isOpaque } from "./world/blocks";
 import {
+  BLOCK_REACH,
   CHUNK_SIZE_X,
   CHUNK_SIZE_Z,
   DEFAULT_RENDER_DISTANCE_CHUNKS,
@@ -29,6 +33,7 @@ async function main(): Promise<void> {
   };
 
   setupLookAndInput(canvas, overlay, camera, input);
+  setupBlockBreaking(canvas, camera, chunkManager);
 
   window.addEventListener("resize", () => renderer.resize());
 
@@ -113,8 +118,27 @@ function setupLookAndInput(
   // movementX/Y deltas, so looking around never hits the edge of the screen.
   // The OS cursor it hides is replaced by the always-centered #crosshair
   // element, so the player still has a visible aim reference.
+  //
+  // Fullscreen is requested on <html> rather than the canvas itself: the
+  // Fullscreen API only keeps the fullscreen element's *descendants* visible
+  // (its "top layer"), and #hud/#crosshair/#overlay are canvas *siblings* —
+  // fullscreening the canvas alone would blank the HUD out.
   overlay.addEventListener("click", () => {
-    canvas.requestPointerLock();
+    // Chained, not fired in parallel: requesting pointer lock while the
+    // fullscreen transition is still in flight makes Chromium reject it
+    // ("root document ... not valid for pointer lock"), so pointer lock is
+    // only requested once the fullscreen promise has settled either way.
+    if (document.fullscreenElement) {
+      canvas.requestPointerLock();
+      return;
+    }
+    document.documentElement
+      .requestFullscreen()
+      .catch(() => {
+        // Fullscreen can be denied (e.g. iframe without the allow attribute);
+        // pointer lock + look/move still work windowed.
+      })
+      .finally(() => canvas.requestPointerLock());
   });
 
   document.addEventListener("pointerlockchange", () => {
@@ -125,6 +149,14 @@ function setupLookAndInput(
   document.addEventListener("pointerlockerror", () => {
     overlay.classList.remove("hidden");
     overlay.textContent = "Pointer lock failed — click to try again.";
+  });
+
+  // Some browsers only release pointer lock (not fullscreen) or vice versa
+  // when the user backs out; keep the two in sync either way.
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && document.pointerLockElement === canvas) {
+      document.exitPointerLock();
+    }
   });
 
   document.addEventListener("mousemove", (e) => {
@@ -147,6 +179,20 @@ function setupLookAndInput(
 
   window.addEventListener("blur", () => {
     for (const key of Object.keys(input) as (keyof InputState)[]) input[key] = false;
+  });
+}
+
+// Bonus: "being able to delete blocks with the mouse" — left click raycasts
+// along the view direction and removes the first solid block within reach.
+function setupBlockBreaking(canvas: HTMLCanvasElement, camera: Camera, chunkManager: ChunkManager): void {
+  canvas.addEventListener("mousedown", (e) => {
+    if (document.pointerLockElement !== canvas || e.button !== 0) return;
+
+    const direction = camera.forwardVector(vec3.create());
+    const hit = raycastVoxel(camera.position, direction, BLOCK_REACH, (x, y, z) =>
+      isOpaque(chunkManager.getBlock(x, y, z)),
+    );
+    if (hit) chunkManager.removeBlock(hit.x, hit.y, hit.z);
   });
 }
 
