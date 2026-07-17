@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     sprint: false,
   };
 
-  setupPointerLockAndInput(canvas, overlay, camera, input);
+  setupLookAndInput(overlay, camera, input);
 
   window.addEventListener("resize", () => renderer.resize());
 
@@ -57,7 +57,6 @@ async function main(): Promise<void> {
     const playerChunkZ = Math.floor(camera.position[2] / CHUNK_SIZE_Z);
     chunkManager.update(playerChunkX, playerChunkZ, renderDistanceChunks);
 
-    renderer.resize();
     renderer.render(camera, chunkManager.visibleChunks(camera.frustum));
 
     const frameMs = performance.now() - frameStart;
@@ -83,7 +82,8 @@ async function main(): Promise<void> {
         `Render distance: ${renderDistanceChunks} chunks (~${renderCubes} cubes)\n` +
         `Loaded chunks: ${chunkManager.loadedChunkCount} (pending mesh: ${chunkManager.pendingMeshCount})\n` +
         `Pos: ${camera.position[0].toFixed(1)}, ${camera.position[1].toFixed(1)}, ${camera.position[2].toFixed(1)}\n` +
-        `Speed: ${input.sprint ? "x20 (sprint)" : "x1"}`;
+        `Speed: ${input.sprint ? "x20 (sprint)" : "x1"}` +
+        (Renderer.lastError ? `\nGPU ERROR: ${Renderer.lastError}` : "");
     }
 
     requestAnimationFrame(frame);
@@ -92,12 +92,7 @@ async function main(): Promise<void> {
   requestAnimationFrame(frame);
 }
 
-function setupPointerLockAndInput(
-  canvas: HTMLCanvasElement,
-  overlay: HTMLDivElement,
-  camera: Camera,
-  input: InputState,
-): void {
+function setupLookAndInput(overlay: HTMLDivElement, camera: Camera, input: InputState): void {
   const keyMap: Record<string, keyof InputState> = {
     KeyW: "forward",
     KeyS: "back",
@@ -109,23 +104,24 @@ function setupPointerLockAndInput(
     ShiftRight: "sprint",
   };
 
-  overlay.addEventListener("click", async () => {
-    if (!document.fullscreenElement) {
-      await canvas.requestFullscreen().catch(() => undefined);
-    }
-    await canvas.requestPointerLock();
-  });
+  let active = false;
 
-  document.addEventListener("pointerlockchange", () => {
-    overlay.classList.toggle("hidden", document.pointerLockElement === canvas);
+  overlay.addEventListener("click", () => {
+    active = true;
+    overlay.classList.add("hidden");
   });
 
   document.addEventListener("mousemove", (e) => {
-    if (document.pointerLockElement !== canvas) return;
+    if (!active) return;
     camera.applyMouseDelta(e.movementX, e.movementY);
   });
 
   window.addEventListener("keydown", (e) => {
+    if (e.code === "Escape") {
+      active = false;
+      overlay.classList.remove("hidden");
+      return;
+    }
     const field = keyMap[e.code];
     if (field) input[field] = true;
   });

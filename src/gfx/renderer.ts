@@ -10,6 +10,8 @@ const VOXEL_UNIFORM_SIZE = 4 * 16 + 16 + 16 + 16; // mat4 + cameraPos + fogColor
 const SKY_UNIFORM_SIZE = 4 * 16 + 16; // invViewProj + sunDirection
 
 export class Renderer {
+  static lastError: string | null = null;
+
   readonly device: GPUDevice;
   private context: GPUCanvasContext;
   private format: GPUTextureFormat;
@@ -44,6 +46,11 @@ export class Renderer {
     const device = await adapter.requestDevice();
     device.lost.then((info) => {
       console.error("WebGPU device lost:", info.message);
+    });
+    device.addEventListener("uncapturederror", (event) => {
+      const message = (event as GPUUncapturedErrorEvent).error.message;
+      console.error("WebGPU validation error:", message);
+      Renderer.lastError = message;
     });
 
     const context = canvas.getContext("webgpu");

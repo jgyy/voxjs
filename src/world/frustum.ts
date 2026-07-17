@@ -21,7 +21,7 @@ export class Frustum {
     this.setPlane(1, m30 - m00, m31 - m01, m32 - m02, m33 - m03); // right
     this.setPlane(2, m30 + m10, m31 + m11, m32 + m12, m33 + m13); // bottom
     this.setPlane(3, m30 - m10, m31 - m11, m32 - m12, m33 - m13); // top
-    this.setPlane(4, m30 + m20, m31 + m21, m32 + m22, m33 + m23); // near
+    this.setPlane(4, m20, m21, m22, m23); // near (WebGPU 0..1 NDC z: near plane is z >= 0)
     this.setPlane(5, m30 - m20, m31 - m21, m32 - m22, m33 - m23); // far
   }
 

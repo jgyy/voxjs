@@ -54,7 +54,12 @@ export class ChunkManager {
     for (const chunk of this.chunks.values()) {
       if (meshBudget <= 0) break;
       if (chunk.dirty) {
-        this.uploadMesh(chunk);
+        try {
+          this.uploadMesh(chunk);
+        } catch (err) {
+          console.error(`Failed to mesh chunk (${chunk.cx}, ${chunk.cz}):`, err);
+          chunk.dirty = false;
+        }
         meshBudget--;
       }
     }
@@ -83,18 +88,14 @@ export class ChunkManager {
     chunk.vertexBuffer = this.device.createBuffer({
       size: vertices.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-      mappedAtCreation: true,
     });
-    new Float32Array(chunk.vertexBuffer.getMappedRange()).set(vertices);
-    chunk.vertexBuffer.unmap();
+    this.device.queue.writeBuffer(chunk.vertexBuffer, 0, vertices);
 
     chunk.indexBuffer = this.device.createBuffer({
       size: indices.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-      mappedAtCreation: true,
     });
-    new Uint32Array(chunk.indexBuffer.getMappedRange()).set(indices);
-    chunk.indexBuffer.unmap();
+    this.device.queue.writeBuffer(chunk.indexBuffer, 0, indices);
 
     chunk.indexCount = indices.length;
     chunk.dirty = false;

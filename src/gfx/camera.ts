@@ -72,7 +72,7 @@ export class Camera {
     const forward = this.forwardVector(vec3.create());
     const target = vec3.add(vec3.create(), this.position, forward);
     mat4.lookAt(this.viewMatrix, this.position, target, UP);
-    mat4.perspective(this.projMatrix, (FOV_DEGREES * Math.PI) / 180, this.aspect, NEAR_PLANE, FAR_PLANE);
+    mat4.perspectiveZO(this.projMatrix, (FOV_DEGREES * Math.PI) / 180, this.aspect, NEAR_PLANE, FAR_PLANE);
     mat4.multiply(this.viewProjMatrix, this.projMatrix, this.viewMatrix);
     this.frustum.setFromViewProjection(this.viewProjMatrix);
   }
