@@ -7,18 +7,28 @@ function index(x: number, y: number, z: number): number {
   return (y * CHUNK_SIZE_Z + z) * CHUNK_SIZE_X + x;
 }
 
+export interface GpuMesh {
+  vao: WebGLVertexArrayObject | null;
+  vertexBuffer: WebGLBuffer | null;
+  indexBuffer: WebGLBuffer | null;
+  indexCount: number;
+  triangleCount: number;
+}
+
+function emptyMesh(): GpuMesh {
+  return { vao: null, vertexBuffer: null, indexBuffer: null, indexCount: 0, triangleCount: 0 };
+}
+
 /** One CHUNK_SIZE_X x CHUNK_HEIGHT x CHUNK_SIZE_Z column of blocks. */
 export class Chunk {
   readonly cx: number;
   readonly cz: number;
   readonly blocks: Uint8Array;
   dirty = true;
-  /** GPU mesh buffers are attached externally by the mesher/renderer. */
+  /** GPU mesh buffers are attached externally by the mesher/renderer; opaque + alpha-blended water/cloud/portal are separate draws. */
   meshVersion = 0;
-  vao: WebGLVertexArrayObject | null = null;
-  vertexBuffer: WebGLBuffer | null = null;
-  indexBuffer: WebGLBuffer | null = null;
-  indexCount = 0;
+  opaque: GpuMesh = emptyMesh();
+  transparent: GpuMesh = emptyMesh();
 
   constructor(cx: number, cz: number) {
     this.cx = cx;
@@ -46,12 +56,15 @@ export class Chunk {
     return this.cz * CHUNK_SIZE_Z;
   }
 
+  private disposeMesh(gl: WebGL2RenderingContext, mesh: GpuMesh): GpuMesh {
+    if (mesh.vertexBuffer) gl.deleteBuffer(mesh.vertexBuffer);
+    if (mesh.indexBuffer) gl.deleteBuffer(mesh.indexBuffer);
+    if (mesh.vao) gl.deleteVertexArray(mesh.vao);
+    return emptyMesh();
+  }
+
   dispose(gl: WebGL2RenderingContext): void {
-    if (this.vertexBuffer) gl.deleteBuffer(this.vertexBuffer);
-    if (this.indexBuffer) gl.deleteBuffer(this.indexBuffer);
-    if (this.vao) gl.deleteVertexArray(this.vao);
-    this.vertexBuffer = null;
-    this.indexBuffer = null;
-    this.vao = null;
+    this.opaque = this.disposeMesh(gl, this.opaque);
+    this.transparent = this.disposeMesh(gl, this.transparent);
   }
 }

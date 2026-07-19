@@ -3,13 +3,16 @@ import {
   CHUNK_SIZE_X,
   CHUNK_SIZE_Z,
   CHUNK_UNLOAD_MARGIN_CHUNKS,
+  EDIT_STORAGE_KEY,
   MAX_EDITED_CHUNKS,
 } from "../config";
-import { BlockId } from "./blocks";
-import { Chunk } from "./chunk";
+import { BlockId, isSolid } from "./blocks";
+import { Biome } from "./biomes";
+import { Chunk, GpuMesh } from "./chunk";
 import { Frustum } from "./frustum";
 import { TerrainGenerator } from "./generator";
-import { buildChunkMesh, VERTEX_FLOATS } from "./mesher";
+import { WorldGenerator } from "./generator-types";
+import { buildChunkMesh, MeshResult, VERTEX_FLOATS } from "./mesher";
 
 function chunkKey(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -17,25 +20,32 @@ function chunkKey(cx: number, cz: number): string {
 
 export class ChunkManager {
   private chunks = new Map<string, Chunk>();
-  private generator = new TerrainGenerator();
+  private generator: WorldGenerator;
   private gl: WebGL2RenderingContext;
-  /** Cap the number of (re)meshes uploaded per frame to avoid frame-time spikes. */
+  /** Caps (re)meshes uploaded and brand-new chunks generated per frame, so a fast-moving or
+   * teleporting player can't cause a multi-hundred-millisecond hitch in a single frame. */
   private meshBudgetPerFrame = 2;
+  private genBudgetPerFrame = 4;
 
   /**
-   * Player-made edits (currently just block removal), keyed by chunk then by
+   * Player-made edits (block removal AND placement), keyed by chunk then by
    * local "x,y,z" position, so a chunk that gets evicted and later
    * regenerated still reflects them. Map iteration order is insertion order,
    * which we exploit as a simple LRU: touching a chunk's edits re-inserts its
    * key at the end, and once the cache holds more than MAX_EDITED_CHUNKS
    * chunks the oldest (first) entry is dropped — mirroring the same
    * "remember visited terrain up to a limit, then forget it" rule the
-   * subject requires for the terrain itself.
+   * subject requires for the terrain itself. Also flushed to localStorage so
+   * a page reload in single-player/offline mode doesn't lose the world.
    */
   private edits = new Map<string, Map<string, BlockId>>();
+  private storageKey: string;
 
-  constructor(gl: WebGL2RenderingContext) {
+  constructor(gl: WebGL2RenderingContext, generator: WorldGenerator, storageKeySuffix = "") {
     this.gl = gl;
+    this.generator = generator;
+    this.storageKey = EDIT_STORAGE_KEY + storageKeySuffix;
+    this.loadEditsFromStorage();
   }
 
   getBlock = (x: number, y: number, z: number): number => {
@@ -51,8 +61,34 @@ export class ChunkManager {
     return this.generator.getBlockAt(x, y, z);
   };
 
-  /** Bonus: "being able to delete blocks with the mouse". Returns false if there was nothing to remove. */
-  removeBlock(worldX: number, y: number, worldZ: number): boolean {
+  isSolidAt = (x: number, y: number, z: number): boolean => isSolid(this.getBlock(x, y, z));
+
+  /** Only meaningful for the overworld generator; other dimensions (e.g. the nether) have no biomes. */
+  biomeAt(x: number, z: number): Biome | null {
+    return this.generator instanceof TerrainGenerator ? this.generator.biomeAt(x, z) : null;
+  }
+
+  /** Bonus: "being able to delete blocks with the mouse". Returns the removed block id (for pickup), or null if nothing was removed. */
+  removeBlock(worldX: number, y: number, worldZ: number): BlockId | null {
+    const cx = Math.floor(worldX / CHUNK_SIZE_X);
+    const cz = Math.floor(worldZ / CHUNK_SIZE_Z);
+    const chunk = this.chunks.get(chunkKey(cx, cz));
+    if (!chunk) return null;
+
+    const lx = worldX - chunk.worldOriginX;
+    const lz = worldZ - chunk.worldOriginZ;
+    const existing = chunk.get(lx, y, lz);
+    if (existing === BlockId.Air) return null;
+
+    chunk.set(lx, y, lz, BlockId.Air);
+    this.recordEdit(cx, cz, lx, y, lz, BlockId.Air);
+    this.markBorderNeighborsDirty(cx, cz, lx, lz);
+    return existing;
+  }
+
+  /** V.1: "place [blocks] wherever you want". Returns false if the target cell isn't free. */
+  placeBlock(worldX: number, y: number, worldZ: number, id: BlockId): boolean {
+    if (y < 0 || y >= CHUNK_HEIGHT) return false;
     const cx = Math.floor(worldX / CHUNK_SIZE_X);
     const cz = Math.floor(worldZ / CHUNK_SIZE_Z);
     const chunk = this.chunks.get(chunkKey(cx, cz));
@@ -60,19 +96,42 @@ export class ChunkManager {
 
     const lx = worldX - chunk.worldOriginX;
     const lz = worldZ - chunk.worldOriginZ;
-    if (chunk.get(lx, y, lz) === BlockId.Air) return false;
+    if (chunk.get(lx, y, lz) !== BlockId.Air) return false;
 
-    chunk.set(lx, y, lz, BlockId.Air);
-    this.recordEdit(cx, cz, lx, y, lz, BlockId.Air);
+    chunk.set(lx, y, lz, id);
+    this.recordEdit(cx, cz, lx, y, lz, id);
+    this.markBorderNeighborsDirty(cx, cz, lx, lz);
+    return true;
+  }
 
-    // A block removed right on a chunk border can expose a face in the
-    // neighboring chunk's mesh that was previously culled as hidden.
+  /**
+   * Unconditional block replacement for simulation systems (bonus: growing
+   * plants, water flow) — unlike placeBlock, the target doesn't need to be
+   * air, since growth/flow *replaces* an existing block. Still recorded as
+   * an edit and re-meshed, same as any other world modification.
+   */
+  setBlockDirect(worldX: number, y: number, worldZ: number, id: BlockId): boolean {
+    if (y < 0 || y >= CHUNK_HEIGHT) return false;
+    const cx = Math.floor(worldX / CHUNK_SIZE_X);
+    const cz = Math.floor(worldZ / CHUNK_SIZE_Z);
+    const chunk = this.chunks.get(chunkKey(cx, cz));
+    if (!chunk) return false;
+
+    const lx = worldX - chunk.worldOriginX;
+    const lz = worldZ - chunk.worldOriginZ;
+    chunk.set(lx, y, lz, id);
+    this.recordEdit(cx, cz, lx, y, lz, id);
+    this.markBorderNeighborsDirty(cx, cz, lx, lz);
+    return true;
+  }
+
+  private markBorderNeighborsDirty(cx: number, cz: number, lx: number, lz: number): void {
+    // A block changed right on a chunk border can expose/hide a face in the
+    // neighboring chunk's mesh that was previously culled the other way.
     if (lx === 0) this.markDirty(cx - 1, cz);
     if (lx === CHUNK_SIZE_X - 1) this.markDirty(cx + 1, cz);
     if (lz === 0) this.markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE_Z - 1) this.markDirty(cx, cz + 1);
-
-    return true;
   }
 
   private markDirty(cx: number, cz: number): void {
@@ -92,6 +151,7 @@ export class ChunkManager {
       const oldestKey = this.edits.keys().next().value;
       if (oldestKey !== undefined) this.edits.delete(oldestKey);
     }
+    this.saveEditsToStorage();
   }
 
   private applyStoredEdits(chunk: Chunk): void {
@@ -103,20 +163,45 @@ export class ChunkManager {
     }
   }
 
+  private saveEditsToStorage(): void {
+    try {
+      const serialized: Record<string, [string, number][]> = {};
+      for (const [key, chunkEdits] of this.edits) serialized[key] = [...chunkEdits.entries()];
+      localStorage.setItem(this.storageKey, JSON.stringify(serialized));
+    } catch {
+      // Storage can be unavailable (private browsing, quota) — edits just won't survive a reload.
+    }
+  }
+
+  private loadEditsFromStorage(): void {
+    try {
+      const raw = localStorage.getItem(this.storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, [string, number][]>;
+      for (const [key, entries] of Object.entries(parsed)) {
+        this.edits.set(key, new Map(entries));
+      }
+    } catch {
+      // Corrupt/foreign data — start with a clean edit set rather than crashing startup.
+    }
+  }
+
   /** Ensures chunks within `radiusChunks` of the player exist, meshed & uploaded, and evicts far ones. */
   update(playerChunkX: number, playerChunkZ: number, radiusChunks: number): void {
-    const wanted = new Set<string>();
+    let genBudget = this.genBudgetPerFrame;
     for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
       for (let dz = -radiusChunks; dz <= radiusChunks; dz++) {
         if (dx * dx + dz * dz > radiusChunks * radiusChunks) continue;
         const cx = playerChunkX + dx;
         const cz = playerChunkZ + dz;
-        wanted.add(chunkKey(cx, cz));
-        if (!this.chunks.has(chunkKey(cx, cz))) {
+        const key = chunkKey(cx, cz);
+        if (!this.chunks.has(key)) {
+          if (genBudget <= 0) continue; // retried again next frame
+          genBudget--;
           const chunk = new Chunk(cx, cz);
           this.generator.generate(chunk);
           this.applyStoredEdits(chunk);
-          this.chunks.set(chunkKey(cx, cz), chunk);
+          this.chunks.set(key, chunk);
         }
       }
     }
@@ -146,23 +231,17 @@ export class ChunkManager {
     }
   }
 
-  private uploadMesh(chunk: Chunk): void {
-    const { vertices, indices } = buildChunkMesh(chunk, this.getBlock);
-    chunk.dispose(this.gl);
-
-    if (indices.length === 0) {
-      chunk.indexCount = 0;
-      chunk.dirty = false;
-      return;
+  private uploadMeshBuffer(mesh: MeshResult): GpuMesh {
+    if (mesh.indices.length === 0) {
+      return { vao: null, vertexBuffer: null, indexBuffer: null, indexCount: 0, triangleCount: 0 };
     }
-
     const gl = this.gl;
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
 
     const vertexBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW);
 
     const stride = VERTEX_FLOATS * 4;
     gl.enableVertexAttribArray(0);
@@ -176,16 +255,20 @@ export class ChunkManager {
 
     const indexBuffer = gl.createBuffer()!;
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
 
     gl.bindVertexArray(null);
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
-    chunk.vao = vao;
-    chunk.vertexBuffer = vertexBuffer;
-    chunk.indexBuffer = indexBuffer;
-    chunk.indexCount = indices.length;
+    return { vao, vertexBuffer, indexBuffer, indexCount: mesh.indices.length, triangleCount: mesh.indices.length / 3 };
+  }
+
+  private uploadMesh(chunk: Chunk): void {
+    const { opaque, transparent } = buildChunkMesh(chunk, this.getBlock);
+    chunk.dispose(this.gl);
+    chunk.opaque = this.uploadMeshBuffer(opaque);
+    chunk.transparent = this.uploadMeshBuffer(transparent);
     chunk.dirty = false;
     chunk.meshVersion++;
   }
@@ -193,12 +276,10 @@ export class ChunkManager {
   /** Chunks with a ready GPU mesh that pass the frustum test, for rendering. */
   *visibleChunks(frustum: Frustum): Generator<Chunk> {
     for (const chunk of this.chunks.values()) {
-      if (!chunk.vao || chunk.indexCount === 0) continue;
+      if (chunk.opaque.indexCount === 0 && chunk.transparent.indexCount === 0) continue;
       const minX = chunk.worldOriginX;
       const minZ = chunk.worldOriginZ;
-      if (
-        frustum.intersectsAABB(minX, 0, minZ, minX + CHUNK_SIZE_X, CHUNK_HEIGHT, minZ + CHUNK_SIZE_Z)
-      ) {
+      if (frustum.intersectsAABB(minX, 0, minZ, minX + CHUNK_SIZE_X, CHUNK_HEIGHT, minZ + CHUNK_SIZE_Z)) {
         yield chunk;
       }
     }
@@ -211,6 +292,13 @@ export class ChunkManager {
   get pendingMeshCount(): number {
     let n = 0;
     for (const c of this.chunks.values()) if (c.dirty) n++;
+    return n;
+  }
+
+  /** For the V.6 debug HUD ("triangles ... counts must be displayed"). Only counts currently-visible-radius chunks with an uploaded mesh. */
+  triangleCountIn(chunks: Iterable<Chunk>): number {
+    let n = 0;
+    for (const c of chunks) n += c.opaque.triangleCount + c.transparent.triangleCount;
     return n;
   }
 

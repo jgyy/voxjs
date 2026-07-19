@@ -1,26 +1,14 @@
 import { mat4, vec3 } from "gl-matrix";
-import {
-  BASE_MOVE_SPEED,
-  FAR_PLANE,
-  FOV_DEGREES,
-  MOUSE_SENSITIVITY,
-  NEAR_PLANE,
-  SPRINT_MULTIPLIER,
-} from "../config";
+import { FAR_PLANE, FOV_DEGREES, MOUSE_SENSITIVITY, NEAR_PLANE } from "../config";
 import { Frustum } from "../world/frustum";
-
-export interface InputState {
-  forward: boolean;
-  back: boolean;
-  left: boolean;
-  right: boolean;
-  up: boolean;
-  down: boolean;
-  sprint: boolean;
-}
 
 const UP = vec3.fromValues(0, 1, 0);
 
+/**
+ * Pure view/projection state — no movement or physics of its own (see
+ * world/physics.ts for that). `position` is the eye position; callers are
+ * free to write to it (physics) or read it (rendering, raycasting).
+ */
 export class Camera {
   position = vec3.fromValues(0, 96, 0);
   yaw = -Math.PI / 2; // facing -Z-ish / world forward
@@ -47,25 +35,17 @@ export class Camera {
     return vec3.normalize(out, out);
   }
 
-  update(dt: number, input: InputState): void {
-    const forward = this.forwardVector(vec3.create());
-    const flatForward = vec3.normalize(vec3.create(), vec3.fromValues(forward[0], 0, forward[2]));
-    const right = vec3.normalize(vec3.create(), vec3.cross(vec3.create(), flatForward, UP));
+  /** Forward projected onto the horizontal plane, used for ground-relative movement. */
+  flatForwardVector(out: vec3): vec3 {
+    out[0] = Math.cos(this.yaw);
+    out[1] = 0;
+    out[2] = Math.sin(this.yaw);
+    return vec3.normalize(out, out);
+  }
 
-    const speed = BASE_MOVE_SPEED * (input.sprint ? SPRINT_MULTIPLIER : 1);
-    const move = vec3.create();
-
-    if (input.forward) vec3.add(move, move, flatForward);
-    if (input.back) vec3.sub(move, move, flatForward);
-    if (input.right) vec3.add(move, move, right);
-    if (input.left) vec3.sub(move, move, right);
-    if (input.up) move[1] += 1;
-    if (input.down) move[1] -= 1;
-
-    if (vec3.length(move) > 0) {
-      vec3.normalize(move, move);
-      vec3.scaleAndAdd(this.position, this.position, move, speed * dt);
-    }
+  rightVector(out: vec3): vec3 {
+    const forward = this.flatForwardVector(vec3.create());
+    return vec3.normalize(out, vec3.cross(out, forward, UP));
   }
 
   updateMatrices(): void {
@@ -79,5 +59,13 @@ export class Camera {
 
   getViewProjMatrix(): mat4 {
     return this.viewProjMatrix;
+  }
+
+  getViewMatrix(): mat4 {
+    return this.viewMatrix;
+  }
+
+  getProjMatrix(): mat4 {
+    return this.projMatrix;
   }
 }

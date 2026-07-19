@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>voxjs — online map</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #0a0a0c;
+        overflow: hidden;
+        font-family: monospace;
+        color: #fff;
+      }
+      #map {
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: grab;
+        image-rendering: pixelated;
+      }
+      #hud {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 8px 10px;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1.5;
+        pointer-events: none;
+      }
+      #legend {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        max-width: 90vw;
+      }
+      .swatch {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        margin-right: 4px;
+        vertical-align: middle;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="map"></canvas>
+    <div id="hud">voxjs online map — drag to pan, scroll to zoom</div>
+    <div id="legend"></div>
+    <script>
+      // Bonus: "An online map interface (like Minecraft's Dynmap)". Plain
+      // JS, no build step — served directly by the game server (src/server/index.ts).
+      const canvas = document.getElementById("map");
+      const ctx = canvas.getContext("2d");
+      const hud = document.getElementById("hud");
+      const legend = document.getElementById("legend");
+
+      const BIOME_NAMES = ["Plains", "Forest", "Sequoia Forest", "Desert", "Canyon", "Swamp", "Savanna", "Snowy Plains", "Mountain", "Island"];
+      const BIOME_COLORS = ["#6ea23c", "#2f6b2f", "#234d33", "#d8c789", "#a24a2c", "#4b5a3a", "#b6a23c", "#e8ecf2", "#8c8c8c", "#d8cf9e"];
+      legend.innerHTML = BIOME_NAMES.map((n, i) => `<span><span class="swatch" style="background:${BIOME_COLORS[i]}"></span>${n}</span>`).join("");
+
+      let centerX = 0;
+      let centerZ = 0;
+      let blocksPerPixel = 8;
+      let players = [];
+      let dragging = false;
+      let lastMouse = [0, 0];
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      canvas.addEventListener("mousedown", (e) => {
+        dragging = true;
+        lastMouse = [e.clientX, e.clientY];
+        canvas.style.cursor = "grabbing";
+      });
+      window.addEventListener("mouseup", () => {
+        dragging = false;
+        canvas.style.cursor = "grab";
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - lastMouse[0];
+        const dy = e.clientY - lastMouse[1];
+        lastMouse = [e.clientX, e.clientY];
+        centerX -= dx * blocksPerPixel;
+        centerZ -= dy * blocksPerPixel;
+      });
+      canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        blocksPerPixel = Math.max(0.5, Math.min(32, blocksPerPixel * (e.deltaY > 0 ? 1.2 : 0.8)));
+      });
+
+      async function fetchMap() {
+        const radius = Math.ceil((Math.max(canvas.width, canvas.height) / 2) * blocksPerPixel);
+        const step = Math.max(1, Math.round(blocksPerPixel));
+        const res = await fetch(`/api/map?cx=${Math.round(centerX)}&cz=${Math.round(centerZ)}&radius=${radius}&step=${step}`);
+        return res.json();
+      }
+
+      async function fetchPlayers() {
+        const res = await fetch("/api/players");
+        players = await res.json();
+      }
+
+      function worldToScreen(x, z) {
+        return [canvas.width / 2 + (x - centerX) / blocksPerPixel, canvas.height / 2 + (z - centerZ) / blocksPerPixel];
+      }
+
+      async function render() {
+        try {
+          const data = await fetchMap();
+          const cellPx = data.step / blocksPerPixel;
+          for (let iz = 0; iz < data.size; iz++) {
+            for (let ix = 0; ix < data.size; ix++) {
+              const color = data.colors[iz * data.size + ix];
+              const wx = data.originX + ix * data.step;
+              const wz = data.originZ + iz * data.step;
+              const [sx, sz] = worldToScreen(wx, wz);
+              ctx.fillStyle = color;
+              ctx.fillRect(sx, sz, Math.ceil(cellPx) + 1, Math.ceil(cellPx) + 1);
+            }
+          }
+        } catch (err) {
+          console.error("map fetch failed", err);
+        }
+
+        for (const p of players) {
+          const [sx, sz] = worldToScreen(p.x, p.z);
+          ctx.fillStyle = p.dimension === "nether" ? "#ff5533" : "#ffffff";
+          ctx.beginPath();
+          ctx.arc(sx, sz, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#000";
+          ctx.stroke();
+          ctx.fillText(p.name, sx + 6, sz - 6);
+        }
+
+        hud.textContent = `voxjs online map — center (${Math.round(centerX)}, ${Math.round(centerZ)}), ${blocksPerPixel.toFixed(1)} blocks/px, ${players.length} player(s) online`;
+      }
+
+      async function loop() {
+        await fetchPlayers();
+        await render();
+        setTimeout(loop, 1500);
+      }
+      loop();
+    </script>
+  </body>
+</html>

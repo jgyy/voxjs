@@ -60,14 +60,111 @@
       #overlay.hidden {
         display: none;
       }
+      #hud.hidden {
+        display: none;
+      }
+      #hotbar {
+        position: fixed;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 4px;
+        pointer-events: none;
+      }
+      .hotbar-slot {
+        width: 40px;
+        height: 40px;
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        background: rgba(20, 20, 20, 0.5);
+        color: #fff;
+        font-size: 11px;
+        text-align: right;
+        padding: 2px;
+        box-sizing: border-box;
+        text-shadow: 0 0 3px #000;
+      }
+      .hotbar-slot.selected {
+        border-color: #fff;
+        box-shadow: 0 0 6px #fff;
+      }
+      #playerlist {
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        color: #fff;
+        text-shadow: 0 0 4px #000, 0 0 2px #000;
+        font-size: 14px;
+        line-height: 1.4;
+        white-space: pre;
+        pointer-events: none;
+        user-select: none;
+      }
+      #playerlist.hidden {
+        display: none;
+      }
+      #damageflash {
+        position: fixed;
+        inset: 0;
+        background: radial-gradient(ellipse at center, rgba(200, 0, 0, 0) 40%, rgba(200, 0, 0, 0.45) 100%);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease-out;
+      }
+      #damageflash.flash {
+        opacity: 1;
+        transition: opacity 0.02s;
+      }
+      #craftingpanel {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(20, 20, 24, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        border-radius: 6px;
+        padding: 14px 16px;
+        color: #fff;
+        font-family: monospace;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 260px;
+      }
+      #craftingpanel.hidden {
+        display: none;
+      }
+      .recipe-row {
+        font-family: monospace;
+        font-size: 13px;
+        text-align: left;
+        padding: 6px 8px;
+        background: #2a2a30;
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      .recipe-row:hover:not(.disabled) {
+        background: #3a3a44;
+      }
+      .recipe-row.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
     </style>
   </head>
   <body>
     <canvas id="gpu-canvas"></canvas>
     <div id="crosshair"></div>
     <div id="hud"></div>
+    <div id="hotbar"></div>
+    <div id="playerlist" class="hidden"></div>
+    <div id="damageflash"></div>
+    <div id="craftingpanel" class="hidden"></div>
     <div id="overlay">
-      Click to play (fullscreen) — WASD move, mouse look, left-click breaks blocks, Shift = x20 speed, Esc to release
+      Click to play (fullscreen) — WASD move, mouse look, Space jump/fly-up, Ctrl fly-down, Shift sprint, F toggle fly,
+      left-click break/attack, right-click place/shoot bow, scroll/1-9 hotbar, C crafting, F3 HUD, Tab players, Esc release
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

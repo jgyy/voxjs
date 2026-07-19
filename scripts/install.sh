@@ -11,7 +11,7 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Installing dependencies (gl-matrix, simplex-noise, vite, typescript)..."
+echo "Installing dependencies (gl-matrix, ws, vite, typescript, tsx)..."
 npm install
 
 echo "Done. Run 'npm run dev' to start the dev server."

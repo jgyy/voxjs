@@ -4,6 +4,10 @@ export interface RaycastHit {
   x: number;
   y: number;
   z: number;
+  /** The empty cell immediately before the hit — where a placed block would go. */
+  prevX: number;
+  prevY: number;
+  prevZ: number;
 }
 
 interface AxisWalk {
@@ -41,9 +45,16 @@ export function raycastVoxel(
   const ay = axisWalk(direction[1], origin[1]);
   const az = axisWalk(direction[2], origin[2]);
 
+  let prevX = x;
+  let prevY = y;
+  let prevZ = z;
+
   let traveled = 0;
   while (traveled <= maxDistance) {
-    if (isSolid(x, y, z)) return { x, y, z };
+    if (isSolid(x, y, z)) return { x, y, z, prevX, prevY, prevZ };
+    prevX = x;
+    prevY = y;
+    prevZ = z;
 
     if (ax.tMax < ay.tMax && ax.tMax < az.tMax) {
       traveled = ax.tMax;

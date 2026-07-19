@@ -141,3 +141,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Multiplayer server's persisted world edits (src/server/store.ts)
+/world-data/
